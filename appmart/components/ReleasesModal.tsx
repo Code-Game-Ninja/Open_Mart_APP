@@ -81,22 +81,75 @@ export default function ReleasesModal({ releases, visible, onClose, repoName }: 
     try {
       setDownloading(asset.id);
 
-      // For APK and other files, open in browser
-      if (Platform.OS === 'android' || Platform.OS === 'ios') {
-        const supported = await Linking.canOpenURL(asset.browser_download_url);
-        if (supported) {
-          await Linking.openURL(asset.browser_download_url);
-          Alert.alert(
-            'Download Started',
-            `${asset.name} download has started in your browser. Check your downloads folder.`,
-            [{ text: 'OK' }]
-          );
-        }
-      }
+      // Download using expo-file-system for proper mobile downloads
+      const fileName = asset.name;
+      const fileUri = FileSystem.documentDirectory + fileName;
+
+      Alert.alert(
+        'Download',
+        `Download ${fileName}?`,
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => setDownloading(null) },
+          {
+            text: 'Download',
+            onPress: async () => {
+              try {
+                // Show download progress
+                const downloadResumable = FileSystem.createDownloadResumable(
+                  asset.browser_download_url,
+                  fileUri,
+                  {},
+                  (downloadProgress) => {
+                    const progress = downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite;
+                    console.log(`Download progress: ${(progress * 100).toFixed(0)}%`);
+                  }
+                );
+
+                const result = await downloadResumable.downloadAsync();
+                
+                if (result) {
+                  Alert.alert(
+                    'Download Complete',
+                    `${fileName} has been downloaded successfully.`,
+                    [
+                      {
+                        text: 'Open',
+                        onPress: async () => {
+                          // For APK files on Android, use system intent
+                          if (Platform.OS === 'android' && fileName.endsWith('.apk')) {
+                            try {
+                              await Linking.openURL(`file://${result.uri}`);
+                            } catch (error) {
+                              // Fallback to sharing
+                              if (await Sharing.isAvailableAsync()) {
+                                await Sharing.shareAsync(result.uri);
+                              }
+                            }
+                          } else {
+                            // For other files, use sharing
+                            if (await Sharing.isAvailableAsync()) {
+                              await Sharing.shareAsync(result.uri);
+                            }
+                          }
+                        }
+                      },
+                      { text: 'OK' }
+                    ]
+                  );
+                }
+              } catch (downloadError) {
+                Alert.alert('Download Failed', 'Could not download the file. Please try again.');
+                console.error('Download error:', downloadError);
+              } finally {
+                setDownloading(null);
+              }
+            }
+          }
+        ]
+      );
     } catch (error) {
       Alert.alert('Download Error', 'Failed to start download. Please try again.');
       console.error('Download error:', error);
-    } finally {
       setDownloading(null);
     }
   };
