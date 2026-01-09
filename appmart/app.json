@@ -51,9 +51,6 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    },
-    "extra": {
-      "githubToken": process.env.EXPO_PUBLIC_GITHUB_TOKEN
     }
   }
 }

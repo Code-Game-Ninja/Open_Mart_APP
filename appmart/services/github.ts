@@ -1,7 +1,5 @@
 // GitHub API Service - Production Ready
-import Constants from 'expo-constants';
-
-const GITHUB_TOKEN = Constants.expoConfig?.extra?.githubToken || process.env.EXPO_PUBLIC_GITHUB_TOKEN || '';
+const GITHUB_TOKEN = process.env.EXPO_PUBLIC_GITHUB_TOKEN || '';
 const BASE_URL = 'https://api.github.com';
 
 if (!GITHUB_TOKEN) {
