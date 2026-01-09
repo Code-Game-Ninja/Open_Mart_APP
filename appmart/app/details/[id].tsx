@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -16,10 +16,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { getRepository, getRepositoryReadme, GitHubRepo } from '@/services/github';
+import { getRepository, getRepositoryReadme, getRepositoryReleases, getLatestRelease } from '@/services/github';
 import { useFavoritesStore } from '@/store/favorites';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import EmptyState from '@/components/EmptyState';
+import ReleasesModal from '@/components/ReleasesModal';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function RepoDetailScreen() {
@@ -29,6 +30,7 @@ export default function RepoDetailScreen() {
   const isDark = colorScheme === 'dark';
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
+  const [showReleases, setShowReleases] = useState(false);
 
   // Parse owner/repo from the id (format: owner__repo with double underscore separator)
   const [owner, repoName] = (id || '').split('__');
@@ -44,6 +46,18 @@ export default function RepoDetailScreen() {
   const { data: readme } = useQuery({
     queryKey: ['readme', owner, repoName],
     queryFn: () => getRepositoryReadme(owner, repoName),
+    enabled: !!owner && !!repoName,
+  });
+
+  const { data: releases } = useQuery({
+    queryKey: ['releases', owner, repoName],
+    queryFn: () => getRepositoryReleases(owner, repoName, { per_page: 20 }),
+    enabled: !!owner && !!repoName,
+  });
+
+  const { data: latestRelease } = useQuery({
+    queryKey: ['latest-release', owner, repoName],
+    queryFn: () => getLatestRelease(owner, repoName),
     enabled: !!owner && !!repoName,
   });
 
@@ -270,13 +284,47 @@ export default function RepoDetailScreen() {
         </Animated.View>
       </ScrollView>
 
-      {/* Footer */}
+      {/* Footer with Download Button */}
       <View style={[styles.footer, { backgroundColor: themeColors.background, borderTopColor: themeColors.border }]}>
-        <TouchableOpacity style={[styles.openButton, { backgroundColor: isDark ? '#2563EB' : '#111827' }]} onPress={handleOpenGitHub}>
+        {releases && releases.length > 0 && (
+          <TouchableOpacity 
+            style={[styles.downloadButton, { backgroundColor: isDark ? '#10B981' : '#059669' }]} 
+            onPress={() => setShowReleases(true)}
+          >
+            <Ionicons name="download-outline" size={24} color="white" />
+            <View style={styles.downloadButtonContent}>
+              <Text style={styles.downloadButtonText}>Download</Text>
+              {latestRelease && (
+                <Text style={styles.downloadVersionText}>
+                  {latestRelease.tag_name} • {releases.length} version{releases.length > 1 ? 's' : ''}
+                </Text>
+              )}
+            </View>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity 
+          style={[
+            releases && releases.length > 0 ? styles.githubButtonSmall : styles.openButton, 
+            { backgroundColor: isDark ? '#2563EB' : '#111827' }
+          ]} 
+          onPress={handleOpenGitHub}
+        >
           <Ionicons name="logo-github" size={24} color="white" />
-          <Text style={styles.openButtonText}>View on GitHub</Text>
+          {!(releases && releases.length > 0) && (
+            <Text style={styles.openButtonText}>View on GitHub</Text>
+          )}
         </TouchableOpacity>
       </View>
+
+      {/* Releases Modal */}
+      {releases && (
+        <ReleasesModal
+          releases={releases}
+          visible={showReleases}
+          onClose={() => setShowReleases(false)}
+          repoName={repo.name}
+        />
+      )}
     </View>
   );
 }
@@ -449,12 +497,15 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
+    flexDirection: 'row',
+    gap: 12,
     padding: 24,
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderTopWidth: 1,
     borderTopColor: '#F3F4F6',
   },
   openButton: {
+    flex: 1,
     backgroundColor: '#111827',
     height: 56,
     borderRadius: 16,
@@ -472,5 +523,48 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 17,
+  },
+  downloadButton: {
+    flex: 1,
+    backgroundColor: '#059669',
+    height: 56,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  downloadButtonContent: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 2,
+  },
+  downloadButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 17,
+  },
+  downloadVersionText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  githubButtonSmall: {
+    width: 56,
+    height: 56,
+    backgroundColor: '#111827',
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
 });

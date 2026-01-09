@@ -38,6 +38,28 @@ export interface SearchResponse {
   items: GitHubRepo[];
 }
 
+export interface ReleaseAsset {
+  id: number;
+  name: string;
+  size: number;
+  download_count: number;
+  browser_download_url: string;
+  content_type: string;
+  created_at: string;
+}
+
+export interface GitHubRelease {
+  id: number;
+  tag_name: string;
+  name: string;
+  body: string;
+  created_at: string;
+  published_at: string;
+  assets: ReleaseAsset[];
+  prerelease: boolean;
+  draft: boolean;
+}
+
 const headers = {
   'Accept': 'application/vnd.github+json',
   'Authorization': `Bearer ${GITHUB_TOKEN}`,
@@ -158,6 +180,59 @@ export async function getReactNativeApps(): Promise<SearchResponse> {
     sort: 'stars',
     per_page: 30,
   });
+}
+
+// Get repository releases
+export async function getRepositoryReleases(
+  owner: string,
+  repo: string,
+  options?: {
+    per_page?: number;
+    page?: number;
+  }
+): Promise<GitHubRelease[]> {
+  const params = new URLSearchParams({
+    per_page: String(options?.per_page || 10),
+    page: String(options?.page || 1),
+  });
+
+  try {
+    const response = await fetch(
+      `${BASE_URL}/repos/${owner}/${repo}/releases?${params}`,
+      { headers }
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch releases');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching releases:', error);
+    throw error;
+  }
+}
+
+// Get latest release
+export async function getLatestRelease(
+  owner: string,
+  repo: string
+): Promise<GitHubRelease | null> {
+  try {
+    const response = await fetch(
+      `${BASE_URL}/repos/${owner}/${repo}/releases/latest`,
+      { headers }
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching latest release:', error);
+    return null;
+  }
 }
 
 // Search by language
