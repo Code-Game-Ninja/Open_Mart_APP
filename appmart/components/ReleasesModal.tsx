@@ -11,8 +11,9 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { GitHubRelease, ReleaseAsset } from '@/services/github';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -53,7 +54,7 @@ export default function ReleasesModal({ releases, visible, onClose, repoName }: 
     });
   };
 
-  const getFileIcon = (fileName: string): string => {
+  const getFileIcon = (fileName: string): keyof typeof Ionicons.glyphMap => {
     const ext = fileName.toLowerCase().split('.').pop();
     switch (ext) {
       case 'apk':
@@ -81,9 +82,7 @@ export default function ReleasesModal({ releases, visible, onClose, repoName }: 
     try {
       setDownloading(asset.id);
 
-      // Download using expo-file-system for proper mobile downloads
       const fileName = asset.name;
-      const fileUri = FileSystem.documentDirectory + fileName;
 
       Alert.alert(
         'Download',
@@ -94,48 +93,88 @@ export default function ReleasesModal({ releases, visible, onClose, repoName }: 
             text: 'Download',
             onPress: async () => {
               try {
-                // Show download progress
-                const downloadResumable = FileSystem.createDownloadResumable(
+                // Download to cache directory first
+                const cacheUri = FileSystem.cacheDirectory + fileName;
+                
+                const downloadResult = await FileSystem.downloadAsync(
                   asset.browser_download_url,
-                  fileUri,
-                  {},
-                  (downloadProgress) => {
-                    const progress = downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite;
-                    console.log(`Download progress: ${(progress * 100).toFixed(0)}%`);
-                  }
+                  cacheUri
                 );
 
-                const result = await downloadResumable.downloadAsync();
-                
-                if (result) {
-                  Alert.alert(
-                    'Download Complete',
-                    `${fileName} has been downloaded successfully.`,
-                    [
-                      {
-                        text: 'Open',
-                        onPress: async () => {
-                          // For APK files on Android, use system intent
-                          if (Platform.OS === 'android' && fileName.endsWith('.apk')) {
-                            try {
-                              await Linking.openURL(`file://${result.uri}`);
-                            } catch (error) {
-                              // Fallback to sharing
-                              if (await Sharing.isAvailableAsync()) {
-                                await Sharing.shareAsync(result.uri);
-                              }
-                            }
-                          } else {
-                            // For other files, use sharing
-                            if (await Sharing.isAvailableAsync()) {
-                              await Sharing.shareAsync(result.uri);
-                            }
-                          }
+                if (downloadResult.status === 200) {
+                  // For Android, use Storage Access Framework to save to Downloads
+                  if (Platform.OS === 'android') {
+                    try {
+                      // Request permission to save to Downloads folder
+                      const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+                      
+                      if (permissions.granted) {
+                        // Create file in the selected directory (Downloads)
+                        const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
+                          permissions.directoryUri,
+                          fileName,
+                          asset.content_type || 'application/octet-stream'
+                        );
+                        
+                        // Read the downloaded file and write to destination
+                        const fileContent = await FileSystem.readAsStringAsync(downloadResult.uri, {
+                          encoding: FileSystem.EncodingType.Base64,
+                        });
+                        
+                        await FileSystem.writeAsStringAsync(destinationUri, fileContent, {
+                          encoding: FileSystem.EncodingType.Base64,
+                        });
+
+                        // Clean up cache file
+                        await FileSystem.deleteAsync(downloadResult.uri, { idempotent: true });
+
+                        Alert.alert(
+                          '✅ Download Complete',
+                          `${fileName} has been saved to your Downloads folder.`,
+                          fileName.endsWith('.apk') 
+                            ? [
+                                {
+                                  text: 'Install APK',
+                                  onPress: async () => {
+                                    try {
+                                      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+                                        data: destinationUri,
+                                        flags: 1,
+                                        type: 'application/vnd.android.package-archive',
+                                      });
+                                    } catch (e) {
+                                      Alert.alert('Info', 'Open your file manager and tap the APK to install it.');
+                                    }
+                                  }
+                                },
+                                { text: 'OK' }
+                              ]
+                            : [{ text: 'OK' }]
+                        );
+                      } else {
+                        // Permission denied, use sharing as fallback
+                        if (await Sharing.isAvailableAsync()) {
+                          await Sharing.shareAsync(downloadResult.uri, {
+                            mimeType: asset.content_type || 'application/octet-stream',
+                            dialogTitle: `Save ${fileName}`,
+                          });
                         }
-                      },
-                      { text: 'OK' }
-                    ]
-                  );
+                      }
+                    } catch (safError) {
+                      console.error('SAF error:', safError);
+                      // Fallback to sharing
+                      if (await Sharing.isAvailableAsync()) {
+                        await Sharing.shareAsync(downloadResult.uri);
+                      }
+                    }
+                  } else {
+                    // iOS - use sharing
+                    if (await Sharing.isAvailableAsync()) {
+                      await Sharing.shareAsync(downloadResult.uri);
+                    }
+                  }
+                } else {
+                  Alert.alert('Download Failed', 'Server returned an error. Please try again.');
                 }
               } catch (downloadError) {
                 Alert.alert('Download Failed', 'Could not download the file. Please try again.');
